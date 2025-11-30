@@ -1,0 +1,14 @@
+@import "tailwindcss";
+
+body, html, #root {
+  height: 100%;
+  margin: 0;
+  background: #111;
+  overflow: hidden;
+  font-family: 'Inter', sans-serif;
+}
+
+/* Retro font for HUD */
+.font-retro {
+  font-family: 'Press Start 2P', cursive;
+}
