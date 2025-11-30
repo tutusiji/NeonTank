@@ -1,0 +1,5 @@
+{
+  "name": "Neon Tank 2.5D",
+  "description": "A modern, voxel-style 2.5D remake of the classic Battle City (97 Tank) using React Three Fiber and Tailwind.",
+  "requestFramePermissions": []
+}
