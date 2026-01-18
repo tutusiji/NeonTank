@@ -31,18 +31,40 @@ import {
 } from "./Models";
 
 // Utility: Check collision with map grid
+// Improved collision detection considering tank size (0.8x0.8)
 const checkGridCollision = (pos: Position, map: number[][]): boolean => {
-  const x = Math.round(pos.x);
-  const z = Math.round(pos.z);
-  if (x < 0 || x >= GRID_SIZE || z < 0 || z >= GRID_SIZE) return true; // Out of bounds
+  // Tank size is 0.8, so we check a slightly smaller radius to allow smooth movement
+  const tankRadius = 0.35; // Half of 0.7 (slightly smaller than 0.8 for smoother feel)
 
-  const tile = map[z][x];
-  return (
-    tile === TileType.BRICK ||
-    tile === TileType.STEEL ||
-    tile === TileType.WATER ||
-    tile === TileType.BASE
-  );
+  // Check the four corners of the tank's bounding box
+  const checkPoints = [
+    { x: pos.x + tankRadius, z: pos.z + tankRadius }, // Top-right
+    { x: pos.x - tankRadius, z: pos.z + tankRadius }, // Top-left
+    { x: pos.x + tankRadius, z: pos.z - tankRadius }, // Bottom-right
+    { x: pos.x - tankRadius, z: pos.z - tankRadius }, // Bottom-left
+  ];
+
+  for (const point of checkPoints) {
+    const gridX = Math.floor(point.x + 0.5); // Round to nearest grid cell
+    const gridZ = Math.floor(point.z + 0.5);
+
+    // Out of bounds check
+    if (gridX < 0 || gridX >= GRID_SIZE || gridZ < 0 || gridZ >= GRID_SIZE) {
+      return true;
+    }
+
+    const tile = map[gridZ][gridX];
+    if (
+      tile === TileType.BRICK ||
+      tile === TileType.STEEL ||
+      tile === TileType.WATER ||
+      tile === TileType.BASE
+    ) {
+      return true;
+    }
+  }
+
+  return false;
 };
 
 // Utility: Check bullet collision with rect (simple radius check approximation)
@@ -56,12 +78,14 @@ interface GameEngineProps {
   gameState: GameState;
   setGameState: React.Dispatch<React.SetStateAction<GameState>>;
   onScore: (pts: number) => void;
+  enemyCount: number;
 }
 
 const GameLoop: React.FC<GameEngineProps> = ({
   gameState,
   setGameState,
   onScore,
+  enemyCount,
 }) => {
   // --- Mutable Game State (Refs for performance) ---
   const playerRef = useRef<Tank>({
@@ -74,36 +98,53 @@ const GameLoop: React.FC<GameEngineProps> = ({
     hp: 1,
   });
 
+  // Generate enemies based on enemyCount
+  const initialEnemies = useMemo(() => {
+    const enemies: Tank[] = [];
+    const map = LEVEL_1;
+
+    // Spawn enemies in top 3 rows, distributed evenly
+    for (let i = 0; i < enemyCount; i++) {
+      let x: number, z: number;
+      let attempts = 0;
+
+      // Try to find a valid spawn position
+      do {
+        // Distribute across the top area
+        const row = i % 3; // Use rows 0, 1, 2
+        const col = Math.floor((i / 3) % GRID_SIZE); // Distribute across columns
+
+        x = col;
+        z = row;
+
+        // Add some randomness to avoid perfect grid
+        if (attempts > 0) {
+          x = Math.floor(Math.random() * GRID_SIZE);
+          z = Math.floor(Math.random() * 3);
+        }
+
+        attempts++;
+      } while (
+        attempts < 20 &&
+        (map[z][x] !== TileType.EMPTY || (x === 4 && z === 12)) // Avoid obstacles and player spawn
+      );
+
+      enemies.push({
+        id: `e${i + 1}`,
+        position: { x, z },
+        direction: Direction.DOWN,
+        active: true,
+        type: "enemy",
+        cooldown: 50 + i * 10, // Stagger shooting
+        hp: 1,
+      });
+    }
+
+    return enemies;
+  }, [enemyCount]);
+
   // Initialize enemies directly to prevent empty array triggering win condition on first frame
-  const enemiesRef = useRef<Tank[]>([
-    {
-      id: "e1",
-      position: { x: 0, z: 0 },
-      direction: Direction.DOWN,
-      active: true,
-      type: "enemy",
-      cooldown: 50,
-      hp: 1,
-    },
-    {
-      id: "e2",
-      position: { x: 6, z: 0 },
-      direction: Direction.DOWN,
-      active: true,
-      type: "enemy",
-      cooldown: 100,
-      hp: 1,
-    },
-    {
-      id: "e3",
-      position: { x: 12, z: 0 },
-      direction: Direction.DOWN,
-      active: true,
-      type: "enemy",
-      cooldown: 150,
-      hp: 1,
-    },
-  ]);
+  const enemiesRef = useRef<Tank[]>(initialEnemies);
 
   const bulletsRef = useRef<Bullet[]>([]);
   const explosionsRef = useRef<Explosion[]>([]);
@@ -140,6 +181,32 @@ const GameLoop: React.FC<GameEngineProps> = ({
     };
   }, []);
 
+  // Reset game when starting new game
+  useEffect(() => {
+    if (gameState.status === "playing") {
+      // Reset player
+      playerRef.current = {
+        id: "p1",
+        position: { x: 4, z: 12 },
+        direction: Direction.UP,
+        active: true,
+        type: "player",
+        cooldown: 0,
+        hp: 1,
+      };
+
+      // Reset enemies with new count
+      enemiesRef.current = initialEnemies.map((e) => ({ ...e, active: true }));
+
+      // Reset bullets and explosions
+      bulletsRef.current = [];
+      explosionsRef.current = [];
+
+      // Reset map
+      mapRef.current = JSON.parse(JSON.stringify(LEVEL_1));
+    }
+  }, [gameState.status, initialEnemies]);
+
   // --- The Game Loop (Runs 60fps) ---
   useFrame((state, delta) => {
     if (gameState.status !== "playing") return;
@@ -171,14 +238,11 @@ const GameLoop: React.FC<GameEngineProps> = ({
 
     // Simple grid collision for player
     if (moving && player.active) {
-      // Basic Wall Collision
+      // Basic Wall Collision - only update position if no collision
       if (!checkGridCollision(intendedPos, map)) {
         player.position = intendedPos;
-      } else {
-        // Slide along axis? For now, just stop.
-        player.position.x = Math.round(player.position.x * 2) / 2;
-        player.position.z = Math.round(player.position.z * 2) / 2;
       }
+      // If collision detected, do nothing - tank stays in place (no bouncing)
     }
 
     // 2. Player Shooting
@@ -447,6 +511,7 @@ const GameCanvas: React.FC<GameEngineProps> = ({
   gameState,
   setGameState,
   onScore,
+  enemyCount,
 }) => {
   return (
     <Canvas
@@ -473,6 +538,7 @@ const GameCanvas: React.FC<GameEngineProps> = ({
         gameState={gameState}
         setGameState={setGameState}
         onScore={onScore}
+        enemyCount={enemyCount}
       />
 
       <ContactShadows
