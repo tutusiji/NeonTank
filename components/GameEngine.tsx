@@ -406,6 +406,38 @@ const GameLoop: React.FC<GameEngineProps> = ({
       }
     });
 
+    // C. Bullet vs Bullet Collision (bullets cancel each other out)
+    // Check if player bullets and enemy bullets collide
+    const playerBullets = bulletsRef.current.filter(
+      (b) => b.active && b.owner === "player",
+    );
+    const enemyBullets = bulletsRef.current.filter(
+      (b) => b.active && b.owner === "enemy",
+    );
+
+    playerBullets.forEach((playerBullet) => {
+      enemyBullets.forEach((enemyBullet) => {
+        if (playerBullet.active && enemyBullet.active) {
+          // Check if bullets are close enough to cancel each other
+          // Use a slightly larger threshold (0.4) for easier bullet cancellation
+          if (isColliding(playerBullet.position, enemyBullet.position, 0.4)) {
+            playerBullet.active = false;
+            enemyBullet.active = false;
+            // Create small explosion effect
+            explosionsRef.current.push({
+              id: Math.random().toString(),
+              position: {
+                x: (playerBullet.position.x + enemyBullet.position.x) / 2,
+                z: (playerBullet.position.z + enemyBullet.position.z) / 2,
+              },
+              scale: 0.8,
+              createdAt: state.clock.elapsedTime,
+            });
+          }
+        }
+      });
+    });
+
     // 5. Clean up
     bulletsRef.current = bulletsRef.current.filter((b) => b.active);
     enemiesRef.current = enemiesRef.current.filter((e) => e.active);
