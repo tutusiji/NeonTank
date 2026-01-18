@@ -420,7 +420,7 @@ const GameLoop: React.FC<GameEngineProps> = ({
         if (playerBullet.active && enemyBullet.active) {
           // Check if bullets are close enough to cancel each other
           // Use a slightly larger threshold (0.4) for easier bullet cancellation
-          if (isColliding(playerBullet.position, enemyBullet.position, 0.4)) {
+          if (isColliding(playerBullet.position, enemyBullet.position, 0.5)) {
             playerBullet.active = false;
             enemyBullet.active = false;
             // Create small explosion effect
