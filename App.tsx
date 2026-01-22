@@ -9,6 +9,8 @@ import {
   Skull,
   Plus,
   Minus,
+  Wand2,
+  Loader2,
 } from "lucide-react";
 
 const App: React.FC = () => {
@@ -20,6 +22,9 @@ const App: React.FC = () => {
   });
 
   const [enemyCount, setEnemyCount] = useState(5);
+  const [prompt, setPrompt] = useState("");
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [customMap, setCustomMap] = useState<number[][] | null>(null);
 
   const increaseEnemies = () => {
     setEnemyCount((prev) => Math.min(100, prev + 5));
@@ -36,6 +41,42 @@ const App: React.FC = () => {
       lives: 3,
       level: 1,
     });
+  };
+
+  const generateLevel = async () => {
+    if (!prompt.trim()) return;
+    setIsGenerating(true);
+    try {
+      const fullPrompt = `Generate a 13x13 grid for a Tank Battle game based on the theme: "${prompt}".
+      Rules:
+      - Use 0 for empty space, 1 for brick wall, 2 for steel wall, 3 for water.
+      - The base (eagle) MUST be at coordinates [12][6] (value 4).
+      - Ensure there is empty space around [12][6] for player spawn.
+      - Return ONLY the JSON 2D array of numbers.`;
+
+      const apiKey = (window as any).GEMINI_API_KEY || "AIzaSyCZa9LCraXncT7foh0gsxTG3NUU5G3foKQ";
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: fullPrompt }] }]
+        })
+      });
+      
+      const data = await response.json();
+      const rawText = data.candidates[0].content.parts[0].text;
+      const cleanJson = rawText.replace(/```json|```/g, "").trim();
+      const map = JSON.parse(cleanJson);
+      if (Array.isArray(map) && map.length === 13) {
+        setCustomMap(map);
+        alert("Level generated successfully! Click Start to play.");
+      }
+    } catch (e) {
+      console.error("Failed to generate level", e);
+      alert("Failed to generate level. Please check your API key.");
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
   const addScore = (points: number) => {
@@ -72,6 +113,7 @@ const App: React.FC = () => {
             setGameState={setGameState}
             onScore={addScore}
             enemyCount={enemyCount}
+            customMap={customMap}
           />
         )}
         {/* Preview background when idle */}
@@ -82,6 +124,7 @@ const App: React.FC = () => {
             setGameState={setGameState}
             onScore={addScore}
             enemyCount={enemyCount}
+            customMap={customMap}
           />
         )}
       </div>
@@ -95,31 +138,55 @@ const App: React.FC = () => {
             TANK
           </h1>
           <div className="bg-gray-900 p-8 rounded-2xl border border-gray-700 shadow-2xl flex flex-col items-center">
-            <div className="grid grid-cols-2 gap-8 mb-6 text-gray-300 text-sm">
+            <div className="grid grid-cols-3 gap-8 mb-6 text-gray-300 text-xs">
+              {/* Movement: Arrow Keys */}
               <div className="flex flex-col items-center">
                 <div className="flex gap-1 mb-2">
-                  <div className="w-8 h-8 border border-white rounded flex items-center justify-center">
+                  <div className="w-6 h-6 border border-white rounded flex items-center justify-center text-base">
+                    ↑
+                  </div>
+                </div>
+                <div className="flex gap-1">
+                  <div className="w-6 h-6 border border-white rounded flex items-center justify-center text-base">
+                    ←
+                  </div>
+                  <div className="w-6 h-6 border border-white rounded flex items-center justify-center text-base">
+                    ↓
+                  </div>
+                  <div className="w-6 h-6 border border-white rounded flex items-center justify-center text-base">
+                    →
+                  </div>
+                </div>
+                <span className="mt-2 text-[10px] uppercase">Move Tank</span>
+              </div>
+
+              {/* Turret: WASD */}
+              <div className="flex flex-col items-center">
+                <div className="flex gap-1 mb-2">
+                  <div className="w-6 h-6 border border-yellow-500 rounded flex items-center justify-center text-yellow-500">
                     W
                   </div>
                 </div>
                 <div className="flex gap-1">
-                  <div className="w-8 h-8 border border-white rounded flex items-center justify-center">
+                  <div className="w-6 h-6 border border-yellow-500 rounded flex items-center justify-center text-yellow-500">
                     A
                   </div>
-                  <div className="w-8 h-8 border border-white rounded flex items-center justify-center">
+                  <div className="w-6 h-6 border border-yellow-500 rounded flex items-center justify-center text-yellow-500">
                     S
                   </div>
-                  <div className="w-8 h-8 border border-white rounded flex items-center justify-center">
+                  <div className="w-6 h-6 border border-yellow-500 rounded flex items-center justify-center text-yellow-500">
                     D
                   </div>
                 </div>
-                <span className="mt-2">MOVE</span>
+                <span className="mt-2 text-[10px] uppercase text-yellow-500">Aim Turret</span>
               </div>
+
+              {/* Fire: Space */}
               <div className="flex flex-col items-center justify-center">
-                <div className="w-24 h-8 border border-white rounded flex items-center justify-center mb-2">
+                <div className="w-16 h-6 border border-white rounded flex items-center justify-center mb-2">
                   SPACE
                 </div>
-                <span>FIRE</span>
+                <span className="text-[10px] uppercase">Fire</span>
               </div>
             </div>
 
@@ -145,6 +212,27 @@ const App: React.FC = () => {
                   disabled={enemyCount >= 100}
                 >
                   <Plus className="w-5 h-5 text-white" />
+                </button>
+              </div>
+            </div>
+
+            {/* AI Map Generator */}
+            <div className="mb-6 w-full flex flex-col items-center">
+              <div className="text-gray-400 text-sm mb-2 uppercase tracking-widest">AI Level Generator</div>
+              <div className="flex w-full gap-2">
+                <input 
+                  type="text" 
+                  value={prompt}
+                  onChange={(e) => setPrompt(e.target.value)}
+                  placeholder="e.g. A water world..." 
+                  className="flex-1 bg-gray-800 border border-gray-600 rounded-lg px-4 py-2 text-white outline-none focus:border-yellow-500 transition-colors"
+                />
+                <button
+                  onClick={generateLevel}
+                  disabled={isGenerating}
+                  className="bg-purple-600 hover:bg-purple-500 disabled:bg-gray-700 text-white p-2 rounded-lg transition-colors flex items-center justify-center min-w-[44px]"
+                >
+                  {isGenerating ? <Loader2 className="animate-spin w-5 h-5" /> : <Wand2 className="w-5 h-5" />}
                 </button>
               </div>
             </div>

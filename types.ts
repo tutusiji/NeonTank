@@ -22,17 +22,20 @@ export interface GameObject {
   id: string;
   position: Position;
   direction: Direction;
+  rotation: number; // Y-axis rotation in radians
   active: boolean;
 }
 
 export interface Bullet extends GameObject {
   owner: 'player' | 'enemy';
+  velocity: { x: number; z: number };
 }
 
 export interface Tank extends GameObject {
   type: 'player' | 'enemy';
   cooldown: number;
   hp: number;
+  turretRotation: number; // Turret rotation for player
 }
 
 export interface Explosion {

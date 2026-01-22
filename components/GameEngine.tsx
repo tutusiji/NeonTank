@@ -1,6 +1,7 @@
 import React, { useRef, useState, useEffect, useMemo } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { OrbitControls, ContactShadows, Environment } from "@react-three/drei";
+import { EffectComposer, Bloom, Vignette, ToneMapping } from "@react-three/postprocessing";
 import * as THREE from "three";
 import {
   GRID_SIZE,
@@ -79,6 +80,7 @@ interface GameEngineProps {
   setGameState: React.Dispatch<React.SetStateAction<GameState>>;
   onScore: (pts: number) => void;
   enemyCount: number;
+  customMap?: number[][] | null;
 }
 
 const GameLoop: React.FC<GameEngineProps> = ({
@@ -86,12 +88,15 @@ const GameLoop: React.FC<GameEngineProps> = ({
   setGameState,
   onScore,
   enemyCount,
+  customMap,
 }) => {
   // --- Mutable Game State (Refs for performance) ---
   const playerRef = useRef<Tank>({
     id: "p1",
     position: { x: 4, z: 12 },
     direction: Direction.UP,
+    rotation: Math.PI,
+    turretRotation: 0,
     active: true,
     type: "player",
     cooldown: 0,
@@ -101,7 +106,7 @@ const GameLoop: React.FC<GameEngineProps> = ({
   // Generate enemies based on enemyCount
   const initialEnemies = useMemo(() => {
     const enemies: Tank[] = [];
-    const map = LEVEL_1;
+    const map = customMap || LEVEL_1;
 
     // Spawn enemies in top 3 rows, distributed evenly
     for (let i = 0; i < enemyCount; i++) {
@@ -133,6 +138,8 @@ const GameLoop: React.FC<GameEngineProps> = ({
         id: `e${i + 1}`,
         position: { x, z },
         direction: Direction.DOWN,
+        rotation: 0,
+        turretRotation: 0,
         active: true,
         type: "enemy",
         cooldown: 50 + i * 10, // Stagger shooting
@@ -141,7 +148,7 @@ const GameLoop: React.FC<GameEngineProps> = ({
     }
 
     return enemies;
-  }, [enemyCount]);
+  }, [enemyCount, customMap]);
 
   // Initialize enemies directly to prevent empty array triggering win condition on first frame
   const enemiesRef = useRef<Tank[]>(initialEnemies);
@@ -150,7 +157,10 @@ const GameLoop: React.FC<GameEngineProps> = ({
   const explosionsRef = useRef<Explosion[]>([]);
 
   // We need a local copy of the map to destroy bricks
-  const mapRef = useRef<number[][]>(JSON.parse(JSON.stringify(LEVEL_1)));
+  const mapRef = useRef<number[][]>(JSON.parse(JSON.stringify(customMap || LEVEL_1)));
+
+  // Camera Shake Ref
+  const shakeRef = useRef(0);
 
   // Input State
   const keys = useRef<{ [key: string]: boolean }>({});
@@ -181,6 +191,21 @@ const GameLoop: React.FC<GameEngineProps> = ({
     };
   }, []);
 
+  useEffect(() => {
+    const handleMouseDown = () => {
+      keys.current["MouseDown"] = true;
+    };
+    const handleMouseUp = () => {
+      keys.current["MouseDown"] = false;
+    };
+    window.addEventListener("mousedown", handleMouseDown);
+    window.addEventListener("mouseup", handleMouseUp);
+    return () => {
+      window.removeEventListener("mousedown", handleMouseDown);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, []);
+
   // Reset game when starting new game
   useEffect(() => {
     if (gameState.status === "playing") {
@@ -189,6 +214,8 @@ const GameLoop: React.FC<GameEngineProps> = ({
         id: "p1",
         position: { x: 4, z: 12 },
         direction: Direction.UP,
+        rotation: Math.PI,
+        turretRotation: 0,
         active: true,
         type: "player",
         cooldown: 0,
@@ -203,9 +230,9 @@ const GameLoop: React.FC<GameEngineProps> = ({
       explosionsRef.current = [];
 
       // Reset map
-      mapRef.current = JSON.parse(JSON.stringify(LEVEL_1));
+      mapRef.current = JSON.parse(JSON.stringify(customMap || LEVEL_1));
     }
-  }, [gameState.status, initialEnemies]);
+  }, [gameState.status, initialEnemies, customMap]);
 
   // --- The Game Loop (Runs 60fps) ---
   useFrame((state, delta) => {
@@ -214,48 +241,90 @@ const GameLoop: React.FC<GameEngineProps> = ({
     const player = playerRef.current;
     const map = mapRef.current;
 
-    // 1. Player Movement
+    // 1. Player Movement (Arrow Keys)
     let moving = false;
     let intendedPos = { ...player.position };
+    const moveSpeed = GAME_SPEED;
 
-    if (keys.current["ArrowUp"] || keys.current["KeyW"]) {
-      player.direction = Direction.UP;
-      intendedPos.z -= GAME_SPEED;
+    if (keys.current["ArrowUp"]) {
+      intendedPos.z -= moveSpeed;
+      player.rotation = Math.PI;
       moving = true;
-    } else if (keys.current["ArrowDown"] || keys.current["KeyS"]) {
-      player.direction = Direction.DOWN;
-      intendedPos.z += GAME_SPEED;
-      moving = true;
-    } else if (keys.current["ArrowLeft"] || keys.current["KeyA"]) {
-      player.direction = Direction.LEFT;
-      intendedPos.x -= GAME_SPEED;
-      moving = true;
-    } else if (keys.current["ArrowRight"] || keys.current["KeyD"]) {
-      player.direction = Direction.RIGHT;
-      intendedPos.x += GAME_SPEED;
+    } else if (keys.current["ArrowDown"]) {
+      intendedPos.z += moveSpeed;
+      player.rotation = 0;
       moving = true;
     }
+
+    if (keys.current["ArrowLeft"]) {
+      intendedPos.x -= moveSpeed;
+      player.rotation = -Math.PI / 2;
+      moving = true;
+    } else if (keys.current["ArrowRight"]) {
+      intendedPos.x += moveSpeed;
+      player.rotation = Math.PI / 2;
+      moving = true;
+    }
+
+    // Handle diagonal rotation
+    if (keys.current["ArrowUp"] && keys.current["ArrowLeft"]) player.rotation = -Math.PI * 0.75;
+    if (keys.current["ArrowUp"] && keys.current["ArrowRight"]) player.rotation = Math.PI * 0.75;
+    if (keys.current["ArrowDown"] && keys.current["ArrowLeft"]) player.rotation = -Math.PI * 0.25;
+    if (keys.current["ArrowDown"] && keys.current["ArrowRight"]) player.rotation = Math.PI * 0.25;
 
     // Simple grid collision for player
     if (moving && player.active) {
-      // Basic Wall Collision - only update position if no collision
       if (!checkGridCollision(intendedPos, map)) {
         player.position = intendedPos;
       }
-      // If collision detected, do nothing - tank stays in place (no bouncing)
     }
 
-    // 2. Player Shooting
+    // 2. Turret Rotation (WASD)
+    let targetTurretRotation = player.turretRotation;
+    let hasRotationInput = false;
+
+    if (keys.current["KeyW"]) {
+      targetTurretRotation = Math.PI - player.rotation;
+      hasRotationInput = true;
+    } else if (keys.current["KeyS"]) {
+      targetTurretRotation = 0 - player.rotation;
+      hasRotationInput = true;
+    }
+
+    if (keys.current["KeyA"]) {
+      targetTurretRotation = -Math.PI / 2 - player.rotation;
+      hasRotationInput = true;
+    } else if (keys.current["KeyD"]) {
+      targetTurretRotation = Math.PI / 2 - player.rotation;
+      hasRotationInput = true;
+    }
+
+    // Handle diagonal turret rotation
+    if (keys.current["KeyW"] && keys.current["KeyA"]) targetTurretRotation = -Math.PI * 0.75 - player.rotation;
+    if (keys.current["KeyW"] && keys.current["KeyD"]) targetTurretRotation = Math.PI * 0.75 - player.rotation;
+    if (keys.current["KeyS"] && keys.current["KeyA"]) targetTurretRotation = -Math.PI * 0.25 - player.rotation;
+    if (keys.current["KeyS"] && keys.current["KeyD"]) targetTurretRotation = Math.PI * 0.25 - player.rotation;
+
+    if (hasRotationInput) {
+      player.turretRotation = targetTurretRotation;
+    }
+
     if (player.cooldown > 0) player.cooldown--;
-    if (
-      (keys.current["Space"] || keys.current["Enter"]) &&
-      player.cooldown <= 0 &&
-      player.active
-    ) {
+    
+    // Shooting with Mouse Left Click or Space
+    const isShooting = keys.current["Space"] || keys.current["MouseDown"];
+
+    if (isShooting && player.cooldown <= 0 && player.active) {
+      const angle = player.rotation + player.turretRotation;
       bulletsRef.current.push({
         id: `b_${Date.now()}_p`,
         position: { ...player.position },
-        direction: player.direction,
+        direction: Direction.UP, // Not used for new bullets
+        rotation: angle,
+        velocity: {
+          x: Math.sin(angle) * BULLET_SPEED,
+          z: Math.cos(angle) * BULLET_SPEED,
+        },
         active: true,
         owner: "player",
       });
@@ -294,6 +363,13 @@ const GameLoop: React.FC<GameEngineProps> = ({
           Direction.RIGHT,
         ];
         enemy.direction = dirs[Math.floor(Math.random() * dirs.length)];
+        // Sync visual rotation for enemies
+        switch (enemy.direction) {
+          case Direction.UP: enemy.rotation = Math.PI; break;
+          case Direction.DOWN: enemy.rotation = 0; break;
+          case Direction.LEFT: enemy.rotation = -Math.PI / 2; break;
+          case Direction.RIGHT: enemy.rotation = Math.PI / 2; break;
+        }
       } else {
         enemy.position = enemyIntended;
       }
@@ -301,10 +377,20 @@ const GameLoop: React.FC<GameEngineProps> = ({
       // Shoot randomly
       if (enemy.cooldown > 0) enemy.cooldown--;
       if (enemy.cooldown <= 0 && Math.random() < 0.05) {
+        let vx = 0, vz = 0;
+        let angle = 0;
+        switch (enemy.direction) {
+          case Direction.UP: vz = -BULLET_SPEED; angle = Math.PI; break;
+          case Direction.DOWN: vz = BULLET_SPEED; angle = 0; break;
+          case Direction.LEFT: vx = -BULLET_SPEED; angle = -Math.PI / 2; break;
+          case Direction.RIGHT: vx = BULLET_SPEED; angle = Math.PI / 2; break;
+        }
         bulletsRef.current.push({
           id: `b_${Date.now()}_${enemy.id}`,
           position: { ...enemy.position },
           direction: enemy.direction,
+          rotation: angle,
+          velocity: { x: vx, z: vz },
           active: true,
           owner: "enemy",
         });
@@ -318,20 +404,8 @@ const GameLoop: React.FC<GameEngineProps> = ({
       if (!bullet.active) return;
 
       // Move Bullet
-      switch (bullet.direction) {
-        case Direction.UP:
-          bullet.position.z -= BULLET_SPEED;
-          break;
-        case Direction.DOWN:
-          bullet.position.z += BULLET_SPEED;
-          break;
-        case Direction.LEFT:
-          bullet.position.x -= BULLET_SPEED;
-          break;
-        case Direction.RIGHT:
-          bullet.position.x += BULLET_SPEED;
-          break;
-      }
+      bullet.position.x += bullet.velocity.x;
+      bullet.position.z += bullet.velocity.z;
 
       // A. Wall Collision
       const gx = Math.round(bullet.position.x);
@@ -343,6 +417,7 @@ const GameLoop: React.FC<GameEngineProps> = ({
           map[gz][gx] = TileType.EMPTY;
           bullet.active = false;
           mapChanged = true;
+          shakeRef.current = Math.max(shakeRef.current, 0.4);
           explosionsRef.current.push({
             id: Math.random().toString(),
             position: { x: gx, z: gz },
@@ -351,6 +426,7 @@ const GameLoop: React.FC<GameEngineProps> = ({
           });
         } else if (tile === TileType.STEEL) {
           bullet.active = false;
+          shakeRef.current = Math.max(shakeRef.current, 0.2);
           explosionsRef.current.push({
             id: Math.random().toString(),
             position: { x: gx, z: gz },
@@ -360,6 +436,7 @@ const GameLoop: React.FC<GameEngineProps> = ({
         } else if (tile === TileType.BASE) {
           bullet.active = false;
           map[gz][gx] = 0;
+          shakeRef.current = Math.max(shakeRef.current, 1.0);
           setGameState((prev) => ({ ...prev, status: "gameover" }));
           explosionsRef.current.push({
             id: Math.random().toString(),
@@ -381,6 +458,7 @@ const GameLoop: React.FC<GameEngineProps> = ({
               enemy.active = false;
               bullet.active = false;
               onScore(100);
+              shakeRef.current = Math.max(shakeRef.current, 0.6);
               explosionsRef.current.push({
                 id: Math.random().toString(),
                 position: enemy.position,
@@ -394,6 +472,7 @@ const GameLoop: React.FC<GameEngineProps> = ({
           if (player.active && isColliding(bullet.position, player.position)) {
             player.active = false;
             bullet.active = false;
+            shakeRef.current = Math.max(shakeRef.current, 0.8);
             setGameState((prev) => ({ ...prev, status: "gameover" }));
             explosionsRef.current.push({
               id: Math.random().toString(),
@@ -423,6 +502,7 @@ const GameLoop: React.FC<GameEngineProps> = ({
           if (isColliding(playerBullet.position, enemyBullet.position, 0.5)) {
             playerBullet.active = false;
             enemyBullet.active = false;
+            shakeRef.current = Math.max(shakeRef.current, 0.3);
             // Create small explosion effect
             explosionsRef.current.push({
               id: Math.random().toString(),
@@ -460,6 +540,17 @@ const GameLoop: React.FC<GameEngineProps> = ({
       explosions: [...explosionsRef.current],
       mapRev: mapChanged ? snapshot.mapRev + 1 : snapshot.mapRev,
     });
+
+    // Handle Camera Shake
+    if (shakeRef.current > 0) {
+      state.camera.position.x += (Math.random() - 0.5) * shakeRef.current * 0.5;
+      state.camera.position.y += (Math.random() - 0.5) * shakeRef.current * 0.5;
+      shakeRef.current *= 0.9; // Decay
+      if (shakeRef.current < 0.01) shakeRef.current = 0;
+    } else {
+      // Smoothly return to original camera position if needed (OrbitControls usually handles this)
+      // But we can nudge it back if it drifts
+    }
   });
 
   // --- Rendering ---
@@ -514,6 +605,8 @@ const GameLoop: React.FC<GameEngineProps> = ({
         <TankModel
           position={snapshot.player.position}
           direction={snapshot.player.direction}
+          rotation={snapshot.player.rotation}
+          turretRotation={snapshot.player.turretRotation}
           colorBody={COLORS.player}
           colorTurret={COLORS.playerTurret}
           isMoving={Object.values(keys.current).some((v) => v)}
@@ -524,6 +617,7 @@ const GameLoop: React.FC<GameEngineProps> = ({
           key={e.id}
           position={e.position}
           direction={e.direction}
+          rotation={e.rotation}
           colorBody={COLORS.enemy}
           colorTurret={COLORS.enemyTurret}
           isMoving={true}
@@ -544,6 +638,7 @@ const GameCanvas: React.FC<GameEngineProps> = ({
   setGameState,
   onScore,
   enemyCount,
+  customMap,
 }) => {
   return (
     <Canvas
@@ -571,6 +666,7 @@ const GameCanvas: React.FC<GameEngineProps> = ({
         setGameState={setGameState}
         onScore={onScore}
         enemyCount={enemyCount}
+        customMap={customMap}
       />
 
       <ContactShadows
@@ -588,6 +684,17 @@ const GameCanvas: React.FC<GameEngineProps> = ({
         maxPolarAngle={Math.PI / 3}
         minPolarAngle={Math.PI / 4}
       />
+
+      <EffectComposer>
+        <Bloom 
+          intensity={1.5} 
+          luminanceThreshold={0.2} 
+          luminanceSmoothing={0.9} 
+          height={300} 
+        />
+        <ToneMapping adaptive={true} />
+        <Vignette eskil={false} offset={0.1} darkness={1.1} />
+      </EffectComposer>
     </Canvas>
   );
 };
