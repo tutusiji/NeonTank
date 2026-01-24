@@ -54,7 +54,7 @@ const App: React.FC = () => {
       - Ensure there is empty space around [12][6] for player spawn.
       - Return ONLY the JSON 2D array of numbers.`;
 
-      const apiKey = (window as any).GEMINI_API_KEY || "AIzaSyCZa9LCraXncT7foh0gsxTG3NUU5G3foKQ";
+      const apiKey = import.meta.env.VITE_GEMINI_API_KEY || (window as any).GEMINI_API_KEY;
       const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
